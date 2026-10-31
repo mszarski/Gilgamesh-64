@@ -74,6 +74,16 @@ static struct { bool active; const Line *lines; int n, i; float shown, blip; voi
 void ui_say(const Line *lines, int n, void (*onDone)(void)) { D.active = true; D.lines = lines; D.n = n; D.i = 0; D.shown = 0; D.onDone = onDone; }
 bool ui_dialog_active(void) { return D.active; }
 void ui_dialog_update(float dt, bool adv) {
+#ifdef DEBUG_AUTODIALOG
+    // Recording aid: ignore buttons; each line advances after it has been on screen long enough to read.
+    {
+        static float hold; static int lastI = -1; static const void *lastLines;
+        if (D.lines != lastLines || D.i != lastI) { hold = 0; lastLines = D.lines; lastI = D.i; }
+        int n = D.active ? (int)strlen(D.lines[D.i].text) : 0;
+        if (D.shown >= n) hold += dt;
+        adv = D.shown >= n && hold > 1.2f + n * 0.03f;
+    }
+#endif
     if (!D.active) return;
     int len = strlen(D.lines[D.i].text);
     if (D.shown < len) {
