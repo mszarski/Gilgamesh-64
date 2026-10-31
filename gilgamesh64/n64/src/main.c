@@ -2,6 +2,11 @@
 // Built with libdragon + tiny3d. Everything (models, level, music) is generated in code.
 #include "game.h"
 
+// The VI anti-alias/de-dither filter is free on hardware but is the single biggest cost in
+// software emulators (angrylion), so the web build turns it off.
+#ifndef VI_FILTERS
+#define VI_FILTERS FILTERS_RESAMPLE_ANTIALIAS_DEDITHER
+#endif
 #ifndef GAME_FPS
 #define GAME_FPS 30
 #endif
@@ -271,7 +276,7 @@ int main(void) {
     debug_init_usblog();
     asset_init_compression(2);
     dfs_init(DFS_DEFAULT_LOCATION);
-    display_init(RESOLUTION_320x240, DEPTH_16_BPP, FB_COUNT, GAMMA_NONE, FILTERS_RESAMPLE_ANTIALIAS_DEDITHER);
+    display_init(RESOLUTION_320x240, DEPTH_16_BPP, FB_COUNT, GAMMA_NONE, VI_FILTERS);
     display_set_fps_limit(GAME_FPS);   // 30 fps like many N64 adventures; also halves emulator load
     rdpq_init();
     joypad_init();
@@ -350,7 +355,10 @@ int main(void) {
         float ft = smoothf(clampf((-ref.z - 16) / 14, 0, 1));
         color_t fog = {
             (uint8_t)lerpf(FOG_STEPPE.r, FOG_FOREST.r, ft), (uint8_t)lerpf(FOG_STEPPE.g, FOG_FOREST.g, ft), (uint8_t)lerpf(FOG_STEPPE.b, FOG_FOREST.b, ft), 0xFF};
-        float fogNear = lerpf(22, 10, ft), fogFar = lerpf(56, 38, ft);   // short draw distance keeps the RSP load down
+        float fogNear = lerpf(20, 10, ft), fogFar = lerpf(48, 36, ft);
+#ifdef DEBUG_FOGFAR
+        fogFar = DEBUG_FOGFAR; fogNear = minf(fogNear, fogFar * 0.5f);
+#endif   // short draw distance keeps the RSP load down
 
         // ---------------------------------------------------------- 3D
         frameIdx = (frameIdx + 1) % FB_COUNT;
@@ -367,8 +375,8 @@ int main(void) {
         rdpq_set_prim_color(RGBA32(0, 0, 0, 0));
         rdpq_mode_dithering(DITHER_SQUARE_SQUARE);
 
-        uint8_t amb[4] = {(uint8_t)lerpf(120, 70, ft), (uint8_t)lerpf(105, 85, ft), (uint8_t)lerpf(90, 70, ft), 0xFF};
-        uint8_t dir[4] = {(uint8_t)lerpf(240, 150, ft), (uint8_t)lerpf(220, 160, ft), (uint8_t)lerpf(185, 120, ft), 0xFF};
+        uint8_t amb[4] = {(uint8_t)lerpf(112, 70, ft), (uint8_t)lerpf(106, 85, ft), (uint8_t)lerpf(100, 70, ft), 0xFF};   // keep in sync with light_color() in mesh.c
+        uint8_t dir[4] = {(uint8_t)lerpf(215, 150, ft), (uint8_t)lerpf(205, 160, ft), (uint8_t)lerpf(188, 120, ft), 0xFF};
         T3DVec3 ldir = {{0.45f, 0.8f, 0.4f}}; t3d_vec3_norm(&ldir);
         t3d_light_set_ambient(amb);
         t3d_light_set_directional(0, dir, &ldir);
@@ -376,14 +384,22 @@ int main(void) {
         t3d_state_set_drawflags(T3D_FLAG_SHADED | T3D_FLAG_DEPTH | T3D_FLAG_CULL_BACK);
 
 #ifndef NO_SKY
+        t3d_state_set_drawflags(T3D_FLAG_SHADED | T3D_FLAG_DEPTH | T3D_FLAG_CULL_BACK | T3D_FLAG_NO_LIGHT);   // scenery has baked light
         world_draw_sky(eye);
 #endif
+#ifndef DEBUG_NOFOG
         rdpq_mode_fog(RDPQ_FOG_STANDARD);
+#endif
         rdpq_set_fog_color(fog);
         t3d_fog_set_range(fogNear * RS, fogFar * RS);
         t3d_fog_set_enabled(true);
+#ifndef DEBUG_NOWORLD
         world_draw(eye, g_camYaw, fogFar);
+#endif
+        t3d_state_set_drawflags(T3D_FLAG_SHADED | T3D_FLAG_DEPTH | T3D_FLAG_CULL_BACK);
+#ifndef DEBUG_NOACTORS
         actors_draw();
+#endif
 
         // translucent passes: blob shadows, then glowing effects
         t3d_fog_set_enabled(false);
@@ -399,7 +415,9 @@ int main(void) {
         rdpq_mode_zbuf(true, true);
 
         // ---------------------------------------------------------- 2D
+#ifndef DEBUG_NOHUD
         if (G.state == ST_PLAY || G.state == ST_PAUSE) { if (!s_cutActive) ui_draw_hud(); ui_draw_dialog(); }
+#endif
         ui_draw_overlays();
         rdpq_detach_show();
     }

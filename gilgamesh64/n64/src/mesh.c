@@ -9,6 +9,7 @@ struct MeshB {
     BVert *v; int nv, cv;
     uint16_t *ti; int nt, ct;   // triangle indices (3 per tri)
     bool boxBottoms;            // emit the underside of boxes (characters need them, scenery does not)
+    bool bakeLight;             // light vertex colours now (static scenery) instead of on the RSP every frame
 };
 
 // ------------------------------------------------------------------ random + angles + colors
@@ -47,6 +48,25 @@ MeshB *mb_new(float unit) {
     return mb;
 }
 void mb_box_bottoms(MeshB *mb, bool on) { mb->boxBottoms = on; }
+void mb_bake_light(MeshB *mb, bool on) { mb->bakeLight = on; }
+
+// Same ambient + directional model the RSP applies (see main.c), with the steppe/forest
+// palette chosen by the vertex's own position, so the light fades between the two regions.
+static uint32_t light_color(uint32_t c, const float n[3], float z) {
+    static float L[3] = {0.45f, 0.8f, 0.4f}; static bool init;
+    if (!init) { float l = sqrtf(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]); for (int i = 0; i < 3; i++) L[i] /= l; init = true; }
+    float ft = smoothf(clampf((-z - 16) / 14, 0, 1));
+    float amb[3] = {lerpf(112, 70, ft), lerpf(106, 85, ft), lerpf(100, 70, ft)};
+    float dir[3] = {lerpf(215, 150, ft), lerpf(205, 160, ft), lerpf(188, 120, ft)};
+    float d = maxf(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
+    uint32_t out = c & 0xFF;
+    for (int ch = 0; ch < 3; ch++) {
+        float base = (c >> (24 - ch * 8)) & 0xFF;
+        float lit = base * (amb[ch] + dir[ch] * d) / 255.0f;
+        out |= (uint32_t)clampf(lit, 0, 255) << (24 - ch * 8);
+    }
+    return out;
+}
 void mb_free(MeshB *mb) { if (!mb) return; free(mb->v); free(mb->ti); free(mb); }
 int mb_tris(MeshB *mb) { return mb->nt; }
 void mb_identity(MeshB *mb) { mb_xform(mb, 0, 0, 0, 0, 0, 0, 1, 1, 1); }
@@ -73,8 +93,9 @@ int mb_vert(MeshB *mb, float x, float y, float z, float nx, float ny, float nz, 
     float n[3];
     for (int i = 0; i < 3; i++) n[i] = mb->r[i][0] * nx + mb->r[i][1] * ny + mb->r[i][2] * nz;
     float l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]); if (l < 1e-6f) l = 1;
-    v->n = t3d_vert_pack_normal(&(T3DVec3){{n[0] / l, n[1] / l, n[2] / l}});
-    v->c = rgba;
+    n[0] /= l; n[1] /= l; n[2] /= l;
+    v->n = t3d_vert_pack_normal(&(T3DVec3){{n[0], n[1], n[2]}});
+    v->c = mb->bakeLight ? light_color(rgba, n, v->p[2] / (mb->unit == 1.0f ? RS : 1.0f)) : rgba;
     return mb->nv++;
 }
 void mb_tri(MeshB *mb, int a, int b, int c) {

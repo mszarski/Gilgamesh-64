@@ -798,10 +798,10 @@ index bc46a5f..9c2e324 100644
      }
  
 diff --git a/mupen64plus-core/src/device/rcp/rdp/rdp_core.c b/mupen64plus-core/src/device/rcp/rdp/rdp_core.c
-index f091801..1c7dc2c 100644
+index f091801..647d4a8 100644
 --- a/mupen64plus-core/src/device/rcp/rdp/rdp_core.c
 +++ b/mupen64plus-core/src/device/rcp/rdp/rdp_core.c
-@@ -27,6 +27,13 @@
+@@ -27,6 +27,14 @@
  #include "device/rcp/mi/mi_controller.h"
  #include "device/rcp/rsp/rsp_core.h"
  #include "plugin/plugin.h"
@@ -811,11 +811,12 @@ index f091801..1c7dc2c 100644
 +#define current_rdp_type 0
 +#define RDP_PLUGIN_ANGRYLION 1
 +#define RDP_PLUGIN_PARALLEL 1
++#define RDP_PLUGIN_GLIDEN64 1
 +#endif
  
  static void update_dpc_status(struct rdp_core* dp, uint32_t w)
  {
-@@ -107,6 +114,9 @@ void write_dpc_regs(void* opaque, uint32_t address, uint32_t value, uint32_t mas
+@@ -107,6 +115,9 @@ void write_dpc_regs(void* opaque, uint32_t address, uint32_t value, uint32_t mas
      }
  
      masked_write(&dp->dpc_regs[reg], value, mask);
@@ -825,12 +826,12 @@ index f091801..1c7dc2c 100644
  
      switch(reg)
      {
-@@ -117,7 +127,16 @@ void write_dpc_regs(void* opaque, uint32_t address, uint32_t value, uint32_t mas
+@@ -117,7 +128,16 @@ void write_dpc_regs(void* opaque, uint32_t address, uint32_t value, uint32_t mas
          unprotect_framebuffers(&dp->fb);
          gfx.processRDPList();
          protect_framebuffers(&dp->fb);
 -        signal_rcp_interrupt(dp->mi, MI_INTR_DP);
-+        if (current_rdp_type == RDP_PLUGIN_ANGRYLION || current_rdp_type == RDP_PLUGIN_PARALLEL)
++        if (current_rdp_type == RDP_PLUGIN_ANGRYLION || current_rdp_type == RDP_PLUGIN_PARALLEL || current_rdp_type == RDP_PLUGIN_GLIDEN64)
 +        {
 +            /* LLE RDP plugins flag MI_INTR_DP themselves on SYNC_FULL;
 +             * don't raise a spurious DP interrupt for every DPC_END write

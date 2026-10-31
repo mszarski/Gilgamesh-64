@@ -28,6 +28,9 @@ static void pose_reset(Pose *p) {
 // optional per-part mesh override (e.g. Humbaba's eye colours)
 static const Mesh *s_override[MAX_PARTS];
 
+// Parts whose bit is set are not drawn (their transforms are still computed for children).
+// Used as a cheap level of detail for distant enemies.
+static uint32_t s_lodSkip;
 static void model_draw(const ModelDef *md, const Pose *ps, V3 pos, float facing, float rootRx, float rootRz, float flash) {
     M4 world[MAX_PARTS], root, tilt, L, D;
     m4_trs(&root, pos.x * RS, pos.y * RS, pos.z * RS, 0, facing, 0, RS * md->scale);
@@ -39,7 +42,7 @@ static void model_draw(const ModelDef *md, const Pose *ps, V3 pos, float facing,
         if (ps->sy[i] != 1) for (int r = 0; r < 3; r++) L.m[1][r] *= ps->sy[i];
         m4_mul(&world[i], p->parent >= 0 ? &world[p->parent] : &root, &L);
         const Mesh *mesh = s_override[i] ? s_override[i] : &p->mesh;
-        if (!mesh->block) continue;
+        if (!mesh->block || (s_lodSkip & (1u << i))) continue;
         D = world[i]; m4_scale_cols(&D, 0.01f);
         draw_mesh_at(mesh, &D);
     }
@@ -937,16 +940,20 @@ void actors_draw(void) {
     if (!(P.inv > 0 && P.state != P_DEAD && ((int)(P.inv * 20) & 1) == 0)) model_draw(&M_GIL, &P.pose, P.pos, P.facing, 0, 0, 0);
     model_draw(&M_ENK, &E.pose, E.pos, E.facing, 0, 0, 0);
     for (int i = 0; i < s_nen; i++) {
-        Enemy *e = &s_en[i]; if (e->state == E_GONE || dist2d(e->pos, P.pos) > 50) continue;
+        Enemy *e = &s_en[i]; float ed = dist2d(e->pos, P.pos);
+        if (e->state == E_GONE || ed > 42) continue;
         float rz = 0, flash = e->flash > 0 ? 1 : 0;
         if (e->state == E_DEAD) { rz = minf(1, e->t / 0.5f) * 1.4f; flash = 1; }
         else if (e->state == E_WINDUP && ((int)(e->t * 14) & 1)) flash = 0.35f;
+        // far away: drop legs and tail segments (scorpion: 6 legs + 3 tail tips, lion: 4 legs + tail)
+        if (ed > 16) s_lodSkip = e->kind == 0 ? ((0x3Fu << S_LEG0) | (0x7u << (S_TAIL0 + 1))) : ((0xFu << L_LEG0) | (1u << L_TAIL));
         model_draw(e->kind == 0 ? &M_SCORP : &M_LION, &e->pose, e->pos, e->facing, 0, rz, flash);
+        s_lodSkip = 0;
     }
     s_override[B_EYES] = &MESH_EYES[s_bossEye];
     if (dist2d(B.pos, P.pos) < 60 || G.state == ST_TITLE) model_draw(&M_HUMB, &B.pose, B.pos, B.facing, s_bossRootRx, 0, B.flash > 0 ? 1 : 0);
     s_override[B_EYES] = NULL;
-    for (int i = 0; i < s_npots; i++) if (s_pots[i].alive && dist2d(s_pots[i].pos, P.pos) < 45) draw_simple(&MESH_POT, s_pots[i].pos, s_pots[i].rot, 0, 1);
+    for (int i = 0; i < s_npots; i++) if (s_pots[i].alive && dist2d(s_pots[i].pos, P.pos) < 30) draw_simple(&MESH_POT, s_pots[i].pos, s_pots[i].rot, 0, 1);
     pickups_draw();
     for (int i = 0; i < MAX_FB; i++) if (s_fb[i].used) draw_simple(s_fb[i].reflected ? &MESH_FIRE_R : &MESH_FIRE, s_fb[i].pos, s_fb[i].rot, s_fb[i].rot * 0.7f, 1);
     particles_draw();
@@ -957,7 +964,7 @@ void actors_draw(void) {
 static void draw_shadow(V3 p, float r) { M4 m; m4_trs(&m, p.x * RS, (height_at(p.x, p.z) + 0.05f) * RS, p.z * RS, 0, 0, 0, r * RS * 0.01f); draw_mesh_at(&MESH_SHADOW, &m); }
 void actors_draw_shadows(void) {
     draw_shadow(P.pos, 0.55f); draw_shadow(E.pos, 0.55f);
-    for (int i = 0; i < s_nen; i++) if (s_en[i].state != E_GONE && dist2d(s_en[i].pos, P.pos) < 40) draw_shadow(s_en[i].pos, 0.8f);
+    for (int i = 0; i < s_nen; i++) if (s_en[i].state != E_GONE && dist2d(s_en[i].pos, P.pos) < 25) draw_shadow(s_en[i].pos, 0.8f);
     if (B.state != BS_DEAD) draw_shadow(B.pos, 2.4f);
 }
 void actors_draw_additive(void) {

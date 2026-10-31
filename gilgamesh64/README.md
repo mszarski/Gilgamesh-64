@@ -86,4 +86,5 @@ python3 -m http.server -d gilgamesh64/web 8098
 ```
 
 It uses EmulatorJS with a mupen64plus core patched for libdragon (`web/emulator/` has the patch and build notes).
-The web ROM is built with `EXTRA_CFLAGS=-DGAME_FPS=20`, which halves the emulator's work.
+The web ROM is built with `EXTRA_CFLAGS="-DGAME_FPS=20 -DVI_FILTERS=FILTERS_RESAMPLE"`: a 20 fps cap and no VI
+anti-alias/de-dither filter, which software emulators spend more time on than on drawing the scene.

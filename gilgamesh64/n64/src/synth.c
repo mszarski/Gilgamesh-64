@@ -2,9 +2,20 @@
 // (a Hijaz-flavoured lyre tune for the steppe and a war drum loop for Humbaba).
 #include "game.h"
 
-#define RATE 22050
+#define RATE 16000
 enum { W_TRI, W_SQR, W_SAW, W_SINE, W_NOISE, W_HPNOISE };
-typedef struct { bool on; int w; float ph, f, f1, t, dur, vol, lp, cut, cut1, music; } Voice;
+// Voices are rendered incrementally: every per-sample quantity (envelope, pitch slide,
+// filter sweep) is a running product, so the inner loop has no expf/powf/sinf calls.
+// That matters a lot under emulation, where the N64's FPU is interpreted.
+typedef struct {
+    bool on; int w;
+    int delay, n, len, attack;        // in samples
+    float ph, inc, incMul;            // phase 0..1, phase step, per-sample pitch slide
+    float env, envMul, vol;           // exponential decay
+    float lp, a, aMul;                // one-pole filter state and coefficient (with sweep)
+    float music;
+    float dur;                        // seconds, for voice stealing
+} Voice;
 #define NV 18
 static Voice V[NV];
 static float s_master = 0.55f, s_noise = 1;
@@ -16,9 +27,18 @@ static float noise1(void) { s_rng = s_rng * 1664525u + 1013904223u; return ((s_r
 static void voice(int w, float f, float dur, float vol, float slideTo, float cutoff, float cut1, float delay, bool music) {
     int slot = -1;
     for (int i = 0; i < NV; i++) if (!V[i].on) { slot = i; break; }
-    if (slot < 0) { float best = 0; for (int i = 0; i < NV; i++) if (V[i].t / V[i].dur > best) { best = V[i].t / V[i].dur; slot = i; } }
+    if (slot < 0) { float best = -1; for (int i = 0; i < NV; i++) { float k = (float)V[i].n / V[i].len; if (k > best) { best = k; slot = i; } } }
     if (slot < 0) slot = 0;
-    V[slot] = (Voice){true, w, 0, f, slideTo > 0 ? slideTo : f, -delay, dur, vol, 0, cutoff, cut1 > 0 ? cut1 : cutoff, music ? 1 : 0};
+    Voice *v = &V[slot];
+    int len = (int)(dur * RATE); if (len < 1) len = 1;
+    float f1 = slideTo > 0 ? slideTo : f, c1 = cut1 > 0 ? cut1 : cutoff;
+    *v = (Voice){0};
+    v->on = true; v->w = w; v->delay = (int)(delay * RATE); v->len = len; v->attack = (int)(0.006f * RATE); v->dur = dur;
+    v->inc = f / RATE; v->incMul = (f > 0 && f1 != f) ? powf(f1 / f, 1.0f / len) : 1;
+    v->env = 1; v->envMul = expf(-5.0f / len); v->vol = vol;
+    float cut0 = cutoff > 0 ? cutoff : 4000;
+    v->a = minf(1, cut0 * TAU_F / RATE); v->aMul = (cutoff > 0 && c1 != cutoff) ? powf(c1 / cutoff, 1.0f / len) : 1;
+    v->music = music ? 1 : 0;
 }
 static inline float st(float base, float semis) { return base * powf(2.0f, semis / 12.0f); }
 
@@ -94,29 +114,23 @@ void sfx(int id) {
 
 // ------------------------------------------------------------------ mixing
 static float s_droneLp[2], s_dronePh[2];
-static inline float render_voice(Voice *v, float dt) {
-    if (v->t < 0) { v->t += dt; return 0; }
-    float k = v->t / v->dur;
-    if (k >= 1) { v->on = false; return 0; }
-    float env = v->t < 0.006f ? v->t / 0.006f : expf(-5.0f * k);
-    float f = v->f1 != v->f ? v->f * powf(v->f1 / v->f, k) : v->f;
+static inline float render_voice(Voice *v) {
+    if (v->delay > 0) { v->delay--; return 0; }
+    if (v->n >= v->len) { v->on = false; return 0; }
+    float env = v->n < v->attack ? (float)v->n / v->attack : v->env;
+    v->env *= v->envMul;
+    v->ph += v->inc; if (v->ph >= 1) v->ph -= 1;
+    v->inc *= v->incMul;
     float s;
     switch (v->w) {
-    case W_TRI: v->ph += f * dt; v->ph -= floorf(v->ph); s = 4 * fabsf(v->ph - 0.5f) - 1; break;
-    case W_SQR: v->ph += f * dt; v->ph -= floorf(v->ph); s = v->ph < 0.5f ? 0.6f : -0.6f; break;
-    case W_SINE: v->ph += f * dt; v->ph -= floorf(v->ph); s = sinf(v->ph * TAU_F); break;
-    case W_SAW: {
-        v->ph += f * dt; v->ph -= floorf(v->ph); float raw = 2 * v->ph - 1;
-        float cut = v->cut > 0 ? v->cut * powf(v->cut1 / v->cut, k) : 4000;
-        v->lp += (raw - v->lp) * minf(1, cut * TAU_F * dt); s = v->lp; break;
+    case W_TRI: s = 4 * fabsf(v->ph - 0.5f) - 1; break;
+    case W_SQR: s = v->ph < 0.5f ? 0.6f : -0.6f; break;
+    case W_SINE: { float x = v->ph < 0.5f ? v->ph * 4 - 1 : 3 - v->ph * 4; s = x * (1.5f - 0.5f * x * x); break; }   // smooth sine-like
+    case W_SAW: v->lp += ((2 * v->ph - 1) - v->lp) * v->a; v->a = minf(1, v->a * v->aMul); s = v->lp; break;
+    case W_NOISE: v->lp += (noise1() - v->lp) * v->a; v->a = minf(1, v->a * v->aMul); s = v->lp * 2.5f; break;
+    default: { float n = noise1(); v->lp += (n - v->lp) * v->a; s = (n - v->lp) * 0.8f; break; }
     }
-    case W_NOISE: {
-        float cut = v->cut * powf(v->cut1 / v->cut, k);
-        v->lp += (noise1() - v->lp) * minf(1, cut * TAU_F * dt); s = v->lp * 2.5f; break;
-    }
-    default: { float n = noise1(); v->lp += (n - v->lp) * minf(1, v->cut * TAU_F * dt); s = (n - v->lp) * 0.8f; break; }
-    }
-    v->t += dt;
+    v->n++;
     return s * env * v->vol;
 }
 void synth_init(void) {
@@ -136,7 +150,7 @@ void synth_update(void) {
         for (int i = 0; i < n; i++) {
             if (s_track) { s_stepT += dt; if (s_stepT >= stepLen) { s_stepT -= stepLen; play_step(); } }
             float mix = 0;
-            for (int k = 0; k < NV; k++) if (V[k].on) mix += render_voice(&V[k], dt);
+            for (int k = 0; k < NV; k++) if (V[k].on) mix += render_voice(&V[k]);
             if (s_track) {   // low droning strings under the music
                 static const float droneF[2][2] = {{73.4f, 110.0f}, {73.4f, 73.4f}};
                 for (int d = 0; d < 2; d++) {

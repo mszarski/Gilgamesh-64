@@ -92,7 +92,7 @@ static MeshB *cb(float x, float z) {
     int ix = (int)floorf((x - CH_X0) / CH_SIZE), iz = (int)floorf((z - CH_Z0) / CH_SIZE);
     ix = ix < 0 ? 0 : (ix >= CH_NX ? CH_NX - 1 : ix);
     iz = iz < 0 ? 0 : (iz >= CH_NZ ? CH_NZ - 1 : iz);
-    if (!s_cb[ix][iz]) s_cb[ix][iz] = mb_new(RS);
+    if (!s_cb[ix][iz]) { s_cb[ix][iz] = mb_new(RS); mb_bake_light(s_cb[ix][iz], true); }
     return s_cb[ix][iz];
 }
 // Set the builder transform for an object placed at (x, y, z) with yaw ry
@@ -169,8 +169,8 @@ static void palm(float x, float z, float s) {
         mb_cyl(m, tx, ty, tz, 0.17f, 0.22f, 1.95f, 4, col_shade(C_TRUNK, 0.9f + 0.1f * (i & 1)), false);
     }
     float top = ty + 0.6f;
-    for (int i = 0; i < 7; i++) {
-        float a = i / 7.0f * TAU_F + srand01() * 0.3f, ca = cosf(a), sa = sinf(a), droop = 0.9f + srand01() * 0.5f;
+    for (int i = 0; i < 6; i++) {
+        float a = i / 6.0f * TAU_F + srand01() * 0.3f, ca = cosf(a), sa = sinf(a), droop = 0.9f + srand01() * 0.5f;
         float bx = tx + sa * 0.2f, bz = tz + ca * 0.2f;
         float ex = tx + sa * 2.4f, ez = tz + ca * 2.4f, ey = top - droop;
         float wx = ca * 0.35f, wz = -sa * 0.35f;
@@ -263,7 +263,7 @@ static void build_props(void) {
     static const float palms[][3] = {{8, 30, 1.1f}, {12, 35, 0.9f}, {-8, 24, 1}, {25, 29, 1.2f}, {26, 12, 1}, {15, 27, 0.9f}, {25, 23, 1.1f}, {17, 14, 1},
                                      {-27, 19, 1.1f}, {-11, 40, 1}, {10, 40, 1.2f}, {27, -4, 1}, {-27, -14, 1}, {-2, 18, 0.9f}, {27, 38, 1.1f}, {-28, 40, 1}};
     for (unsigned i = 0; i < sizeof(palms) / sizeof(palms[0]); i++) palm(palms[i][0], palms[i][1], palms[i][2]);
-    for (int i = 0; i < 18; i++) { float x = BX0 + srand01() * 60, z = -18 + srand01() * 58; if (fabsf(x - path_x(z)) > 3 && sqrtf((x - 20) * (x - 20) + (z - 20) * (z - 20)) > 5) rock(x, z, 0.5f + srand01() * 0.8f, true); }
+    for (int i = 0; i < 8; i++) { float x = BX0 + srand01() * 60, z = -18 + srand01() * 58; if (fabsf(x - path_x(z)) > 3 && sqrtf((x - 20) * (x - 20) + (z - 20) * (z - 20)) > 5) rock(x, z, 0.5f + srand01() * 0.8f, true); }
     for (int i = 0; i < 12; i++) { float side = srand01() < 0.5f ? -1 : 1; rock(side * (31 + srand01() * 4), -20 + srand01() * 64, 1.6f + srand01() * 2, false); }
 
     // ---- oasis well (Seal of Dawn)
@@ -326,7 +326,7 @@ static void build_props(void) {
     s_doorColl = add_box(-3.2f, 3.2f, GATE_Z - 0.5f, GATE_Z + 0.5f);
     for (int d = 0; d < 2; d++) {
         float side = d ? 1 : -1;
-        MeshB *m = mb_new(RS);
+        MeshB *m = mb_new(RS); mb_bake_light(m, true);
         mb_box(m, -side * 1.6f, 3.9f, 0, 3.2f, 7.8f, 0.45f, C_WOOD);
         for (int r = 0; r < 4; r++) for (int c = 0; c < 3; c++) mb_box(m, -side * (0.6f + c * 1.0f), 1.2f + r * 1.8f, 0.27f, 0.18f, 0.18f, 0.12f, C_BRONZE);
         for (int k = 0; k < 3; k++) mb_box(m, -side * 1.6f, 1.0f + k * 2.9f, 0.25f, 3.2f, 0.22f, 0.06f, C_BRONZE);
@@ -358,6 +358,7 @@ static void build_props(void) {
 
 static void build_sky(void) {
     MeshB *m = mb_new(1.0f);  // mountains are far away: 1 unit = 1 decimeter is plenty
+    mb_bake_light(m, true);
     for (int i = 0; i < 26; i++) {
         float a = (i / 26.0f) * TAU_F + srand01() * 0.1f, r = 150 + srand01() * 20, h = 32 + srand01() * 40;
         bool north = sinf(a) < -0.3f;

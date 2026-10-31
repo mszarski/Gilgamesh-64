@@ -14,7 +14,9 @@ Build (Emscripten 3.1.74, EmulatorJS RetroArch fork):
 emmake make -j4 platform=emscripten INITIAL_HEAP=268435456 AUTO_MEMORY_GROWTH=1 LLE=1 HAVE_THR_AL=1 HAVE_PARALLEL_RSP_INTERP=1
 ```
 
-then link with `Makefile.emulatorjs` from https://github.com/EmulatorJS/RetroArch (ASYNC=1, no threads)
+then link with `Makefile.emulatorjs`, passing
+`EMCC_CFLAGS="-sASYNCIFY_REMOVE=@asyncify_remove.json"` (the angrylion and parallel-rsp functions never
+yield, so excluding them from Asyncify instrumentation makes the core faster), from https://github.com/EmulatorJS/RetroArch (ASYNC=1, no threads)
 and pack `mupen64plus_next_libretro.{js,wasm}` with `core.json`, `build.json`, `license.txt` into a 7z
 named `mupen64plus_next-wasm.data`.
 
