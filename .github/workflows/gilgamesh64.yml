@@ -1,0 +1,142 @@
+# Builds Gilgamesh 64 (N64 homebrew, libdragon + tiny3d).
+#
+#  - every push / PR touching gilgamesh64/: build the cartridge ROM and the browser ROM
+#    and keep them as workflow artifacts
+#  - push to main: also deploy gilgamesh64/web/ (with the freshly built browser ROM)
+#    to GitHub Pages
+#  - push a tag named gilgamesh64-v*: also create a GitHub Release with the cartridge ROM
+#
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+name: Gilgamesh 64
+
+on:
+  push:
+    branches: [main]
+    tags: ['gilgamesh64-v*']
+    paths:
+      - 'gilgamesh64/**'
+      - '.github/workflows/gilgamesh64.yml'
+  pull_request:
+    paths:
+      - 'gilgamesh64/**'
+      - '.github/workflows/gilgamesh64.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gilgamesh64-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  N64_INST: /opt/libdragon
+  # Versions the game was developed and tested against.
+  LIBDRAGON_REF: 39d0d6096130836a65710da6730290701d060272   # libdragon "preview" branch
+  TINY3D_REF: f2eccc3998967f1915be58d52f1c5bb6d5598a8c
+  TOOLCHAIN_URL: https://github.com/DragonMinded/libdragon/releases/download/toolchain-continuous-prerelease/gcc-toolchain-mips64-x86_64.deb
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make the SDK directory writable (for the cache)
+        run: sudo mkdir -p "$N64_INST" && sudo chown "$USER" "$N64_INST"
+
+      - name: Restore libdragon + tiny3d
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/libdragon
+            tiny3d
+          key: n64-sdk-${{ env.LIBDRAGON_REF }}-${{ env.TINY3D_REF }}-v1
+
+      - name: Install the MIPS toolchain and build libdragon
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL -o toolchain.deb "$TOOLCHAIN_URL"
+          sudo dpkg -i toolchain.deb      # self-contained; only needs zlib/zstd, present on the runner
+          sudo chown -R "$USER" "$N64_INST"
+          git clone https://github.com/DragonMinded/libdragon.git libdragon-src
+          git -C libdragon-src checkout "$LIBDRAGON_REF"
+          (cd libdragon-src && ./build.sh --no-examples)
+
+      - name: Build tiny3d
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/HailToDodongo/tiny3d.git tiny3d
+          git -C tiny3d checkout "$TINY3D_REF"
+          make -C tiny3d -j"$(nproc)"
+
+      - name: Build cartridge ROM (real hardware and desktop emulators)
+        run: |
+          make -C gilgamesh64/n64 T3D_INST="$PWD/tiny3d" -j"$(nproc)"
+          mkdir -p dist
+          cp gilgamesh64/n64/gilgamesh64.z64 dist/gilgamesh64.z64
+
+      - name: Build browser ROM (20 fps cap, no VI filter)
+        run: |
+          make -C gilgamesh64/n64 T3D_INST="$PWD/tiny3d" clean
+          make -C gilgamesh64/n64 T3D_INST="$PWD/tiny3d" -j"$(nproc)" \
+            EXTRA_CFLAGS="-DGAME_FPS=20 -DVI_FILTERS=FILTERS_RESAMPLE"
+          cp gilgamesh64/n64/gilgamesh64.z64 dist/gilgamesh64-web.z64
+          cp gilgamesh64/n64/gilgamesh64.z64 gilgamesh64/web/gilgamesh64.z64
+
+      - name: Upload ROMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: gilgamesh64-roms
+          path: dist/*.z64
+          if-no-files-found: error
+
+      - name: Upload web page for GitHub Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gilgamesh64/web
+
+  deploy-pages:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/gilgamesh64-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gilgamesh64-roms
+          path: dist
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "Gilgamesh 64 demo level (Tablet V: The Cedar Forest), an N64 homebrew ROM."
+            echo
+            echo "\`gilgamesh64.z64\` runs on a real Nintendo 64 through a flashcart (EverDrive 64, SummerCart64)"
+            echo "and in accurate emulators such as ares or Gopher64."
+            echo
+            echo "Play it in a browser: https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+          } > notes.md
+          gh release create "$TAG" dist/gilgamesh64.z64 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Gilgamesh 64 ${TAG#gilgamesh64-}" \
+            --notes-file notes.md
