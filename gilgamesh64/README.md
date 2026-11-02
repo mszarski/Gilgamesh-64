@@ -95,9 +95,6 @@ anti-alias/de-dither filter, which software emulators spend more time on than on
 `gilgamesh64/`, using the pinned libdragon (preview) and tiny3d versions the game was tested with.
 
 - **Workflow artifacts:** each run keeps `gilgamesh64.z64` (cartridge build) and `gilgamesh64-web.z64`.
-- **GitHub Pages:** pushes to `main` deploy `gilgamesh64/web/` with the freshly built browser ROM.
-  One-time setup: *Settings → Pages → Build and deployment → Source: GitHub Actions*. The game is then at
-  `https://<owner>.github.io/<repo>/`.
 - **Releases:** pushing a tag such as `gilgamesh64-v0.1.0` creates a GitHub Release with the cartridge ROM attached.
 
 ```bash

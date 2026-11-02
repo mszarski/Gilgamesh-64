@@ -71,13 +71,10 @@ Pass as `EXTRA_CFLAGS="-D..."` (clean first):
 ## CI / deploy
 
 `.github/workflows/gilgamesh64.yml` (triggers only on changes under `gilgamesh64/` or the workflow itself):
-builds cartridge + browser ROMs as artifacts; on `main` deploys `gilgamesh64/web/` to GitHub Pages (Pages
-source must be "GitHub Actions"); a `gilgamesh64-v*` tag creates a Release with the cartridge ROM.
-The root `.nojekyll` only matters for branch-based Pages; the Actions deploy doesn't use it.
+builds cartridge + browser ROMs as artifacts; a `gilgamesh64-v*` tag creates a Release with the cartridge ROM.
+The game is deliberately not deployed to GitHub Pages; `gilgamesh64/web/` is only served locally.
 
 ## Gotchas
 
 - Root `.gitignore` ignores `*.png`, so the screenshots referenced in `gilgamesh64/README.md` were never committed;
   use `git add -f` if adding them.
-- `trajectory_classifier/` and the `.claude/hooks/session-start.sh` setup (pip install + `bd`) are leftovers from
-  the monorepo this was split from; the game does not use them.
