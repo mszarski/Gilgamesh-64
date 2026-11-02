@@ -1,0 +1,11 @@
+<!doctype html><html><body style="margin:0;background:#000">
+<div style="width:640px;height:480px"><div id="game" style="width:640px;height:480px"></div></div>
+<script>
+const q = new URLSearchParams(location.search);
+EJS_player = '#game'; EJS_core = q.get('core') || 'parallel_n64'; EJS_gameUrl = q.get('rom') || 'test.z64';
+EJS_pathtodata = 'data/'; EJS_startOnLoaded = true; EJS_disableLocalStorage = true; EJS_DEBUG_XX = true;
+if (q.get('legacy')) EJS_forceLegacyCores = true;
+if (q.get('opts')) EJS_defaultOptions = JSON.parse(q.get('opts'));
+</script>
+<script src="data/loader.js"></script>
+</body></html>
