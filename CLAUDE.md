@@ -1,62 +1,83 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (and other agents; `AGENTS.md` is a symlink to this file).
 
-## Project Overview
+## Project
 
-This is a Python trajectory classification package (`trajectory_classifier`) for analyzing and classifying vehicle trajectory segments. It supports:
-- Converting spherical coordinates (lat/lon/alt) to local Cartesian (ENU)
-- Extracting geometric features (speed, heading, curvature, jerk)
-- Classifying segments as STRAIGHT, TURN, or WIGGLE
-- Computing trajectory similarity (DTW, Fréchet, Hausdorff distances)
-- Learning-based trajectory ranking and quality scoring
+Gilgamesh 64: a late-90s-N64-style 3D action-adventure demo of Tablet V of the *Epic of Gilgamesh*
+(collect three Seals of Shamash, open the cedar door, fight Humbaba). Everything lives under `gilgamesh64/`;
+`gilgamesh64/README.md` is the user-facing doc (level walkthrough, controls, build, release steps).
 
-## Build and Test Commands
+Three tracks of the same level:
+
+| Path | What | Run |
+|------|------|-----|
+| `gilgamesh64/index.html` | Single-file three.js prototype (320x240, dithered), used to iterate on level/combat design | `python3 -m http.server -d gilgamesh64 8064` (needs network: three.js from jsDelivr) |
+| `gilgamesh64/n64/` | The real game: C, libdragon (preview branch) + tiny3d, builds `gilgamesh64.z64` | see Build |
+| `gilgamesh64/web/` | Static EmulatorJS page that plays the ROM in a browser via a patched mupen64plus core | `python3 -m http.server -d gilgamesh64/web 8098` |
+
+The prototype and the N64 port are separate implementations; a gameplay change usually needs doing in both
+if they are to stay in step.
+
+## Build (N64 ROM)
+
+Needs the libdragon MIPS toolchain + libdragon preview and a built tiny3d checkout (not installed locally by default).
 
 ```bash
-# Install dependencies
-pip install -r trajectory_classifier/requirements.txt
-
-# Run all tests
-pytest trajectory_classifier/tests/
-
-# Run a single test file
-pytest trajectory_classifier/tests/test_classifier.py -v
-
-# Run a specific test
-pytest trajectory_classifier/tests/test_classifier.py::TestClassifier::test_classify_straight_trajectory -v
+export N64_INST=/opt/libdragon
+make -C gilgamesh64/n64 T3D_INST=/path/to/tiny3d          # -> gilgamesh64/n64/gilgamesh64.z64
+make -C gilgamesh64/n64 T3D_INST=/path/to/tiny3d clean    # required when changing EXTRA_CFLAGS
 ```
 
-## Architecture
+- Compile-time options go through `EXTRA_CFLAGS` (appended to `N64_CFLAGS`). Object files don't track
+  flags, so always `clean` before rebuilding with different flags.
+- Browser ROM: `EXTRA_CFLAGS="-DGAME_FPS=20 -DVI_FILTERS=FILTERS_RESAMPLE"` (20 fps cap, no VI AA/de-dither,
+  which costs software emulators ~40%). Defaults are 30 fps and `FILTERS_RESAMPLE_ANTIALIAS_DEDITHER`.
+- Pinned, tested SDK versions are `LIBDRAGON_REF` / `TINY3D_REF` in `.github/workflows/gilgamesh64.yml`.
+- There are no automated tests; verification is building and playing in ares (or Gopher64 / the web page).
 
-### Core Modules
+## Architecture (`gilgamesh64/n64/src/`)
 
-- **coordinates.py**: Geodetic (lat/lon/alt) → ECEF → ENU (East-North-Up) local Cartesian conversion using WGS84 ellipsoid
-- **features.py**: Extracts per-point features (speed, acceleration, heading, curvature) and trajectory-level statistics (sinuosity, path efficiency)
-- **classifier.py**: Sliding-window classifier that assigns STRAIGHT/TURN/WIGGLE labels based on heading change patterns
-- **av_features.py**: AV-style metrics including longitudinal/lateral jerk decomposition, comfort scores, smoothness scores
-- **similarity.py**: DTW (with Sakoe-Chiba band optimization), Fréchet distance, Hausdorff distance for trajectory comparison
-- **ranking.py**: HeuristicRanker (weighted AV scores), LearnedRanker (sklearn-based pointwise/pairwise learning)
+- `game.h`: all shared declarations and the global `Game G` state. Game logic is in meters; the renderer
+  uses decimeters (`RS = 10`) because tiny3d's fixed-point pipeline prefers larger values.
+- `main.c`: init, main loop, camera, cutscenes, game-state transitions, debug start setups.
+- `world.c`: terrain, level geometry, collision. +z is south (Uruk), -z is north (Cedar Forest).
+- `actors.c`: player, Enkidu, enemies, Humbaba boss AI, pickups, projectiles, particles; models are part hierarchies.
+- `mesh.c`: procedural mesh builder baked into tiny3d vertex batches inside rspq blocks (static scenery has baked lighting).
+- `ui.c`: HUD, dialogue, area cards, overlays (rdpq 2D). `synth.c`: software synth for SFX + two music loops at 16 kHz.
+- All models, level and music are generated in code; the only assets are two CC0 fonts in `n64/assets/`.
+- Performance is the main constraint (an earlier synth ate the whole CPU and the game ran at ~5 fps): avoid
+  per-sample/per-frame `expf`/`powf`/`sinf`, keep draw ranges, LOD and fog distance tight.
 
-### Data Flow
+## Debug aids
 
-1. Input: DataFrame with `timestamp`, `latitude`, `longitude`, `altitude` columns
-2. `coordinates.to_local_cartesian()` → adds `x`, `y`, `z` (meters, ENU frame)
-3. `features.extract_features()` → adds `speed`, `heading`, `curvature`, etc.
-4. `classifier.classify_trajectory()` → returns `ClassificationResult` with per-point labels and contiguous `ClassifiedSegment` objects
+Pass as `EXTRA_CFLAGS="-D..."` (clean first):
 
-### Classification Logic
+- Start position: `DEBUG_GATE` (+ `DEBUG_GATE_X/Z`, all seals, door open), or `DEBUG_POS` (+ `DEBUG_POS_X/Z`),
+  optionally with `DEBUG_SEALS=<bitmask>` and `DEBUG_DUSK` (lion ring cleared, Dusk seal spawned).
+- `DEBUG_GOD` (no damage), `DEBUG_NOAUDIO`, `DEBUG_AUTODIALOG` (dialogue advances on a reading timer, for recording).
+- Render isolation: `DEBUG_NOWORLD`, `DEBUG_NOACTORS`, `DEBUG_NOHUD`, `DEBUG_NOFOG`, `DEBUG_FOGFAR=<m>`.
+- `debugf` logs tagged `[play]` / `[fight]` events (seals, kills, hits, boss attacks, ending); read them in the emulator's debug log.
 
-- **STRAIGHT**: `|heading_change| < straight_threshold` (default 5°)
-- **TURN**: Sustained `|heading_change| > turn_threshold` (default 15°)
-- **WIGGLE**: Multiple sign changes in heading within window (oscillating/unstable)
+## Web build / emulator core
 
-## Issue Tracking
+- `web/data/` is vendored EmulatorJS (GPL-3.0); `web/data/cores/mupen64plus_next-wasm.data` is a custom core
+  build. Rebuild instructions, base commit and the libdragon patch are in `web/emulator/` and must ship
+  alongside the page (license obligation). Stock browser N64 cores can't run modern libdragon homebrew.
+- `web/index.html` sets `EJS_disableLocalStorage = true`; that is required for `EJS_defaultOptions` to apply.
+- `web/gilgamesh64.z64` is committed, but CI overwrites it with a fresh browser build before deploying.
+  If you update it by hand, build it with the browser flags above, not the cartridge flags.
 
-Use the `bd` command for issue tracking instead of markdown TODOs:
-```bash
-bd create "Task description" -p 1 --json
-bd ready --json
-bd update <id> --status in_progress --json
-bd show <id> --json
-```
+## CI / deploy
+
+`.github/workflows/gilgamesh64.yml` (triggers only on changes under `gilgamesh64/` or the workflow itself):
+builds cartridge + browser ROMs as artifacts; on `main` deploys `gilgamesh64/web/` to GitHub Pages (Pages
+source must be "GitHub Actions"); a `gilgamesh64-v*` tag creates a Release with the cartridge ROM.
+The root `.nojekyll` only matters for branch-based Pages; the Actions deploy doesn't use it.
+
+## Gotchas
+
+- Root `.gitignore` ignores `*.png`, so the screenshots referenced in `gilgamesh64/README.md` were never committed;
+  use `git add -f` if adding them.
+- `trajectory_classifier/` and the `.claude/hooks/session-start.sh` setup (pip install + `bd`) are leftovers from
+  the monorepo this was split from; the game does not use them.
