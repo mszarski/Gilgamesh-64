@@ -1,5 +1,9 @@
 # Gilgamesh 64: session handoff
 
+> **Note:** this handoff was written in the old `mszarski/claude_playground` monorepo, before the project moved here.
+> References to that repo, its `claude/...` branches, `trajectory_classifier`, the `bd` tracker, or "don't edit
+> CLAUDE.md" are out of date. Where this file and CLAUDE.md disagree, CLAUDE.md wins.
+
 Written at the end of the first development session (Oct 31 – Nov 2, 2026) so that a fresh session,
 in a new repository, can continue without the original conversation. Everything lives under
 `gilgamesh64/` (plus `.github/workflows/gilgamesh64.yml` and `.nojekyll` at the root). The rest of this
